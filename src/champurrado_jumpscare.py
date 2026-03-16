@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import random
 import sys
+import time
 from pathlib import Path
-import tkinter as tk
 
+import pygame
 import pillow_heif
-from PIL import Image, ImageDraw, ImageFont, ImageTk
+from PIL import Image, ImageDraw, ImageFont
 
 APP_NAME = "Champurrado Jumpscare"
 PROBABILITY_PERCENT = 0.000001
-CHECK_INTERVAL_MS = 1000
+CHECK_INTERVAL_SECONDS = 1
 POPUP_DURATION_MS = 6000
 
 pillow_heif.register_heif_opener()
@@ -18,50 +19,51 @@ pillow_heif.register_heif_opener()
 
 class ChampurradoJumpscareApp:
     def __init__(self) -> None:
-        self.root = tk.Tk()
-        self.root.withdraw()
         self.rng = random.SystemRandom()
-        self.active_popups: list[tk.Toplevel] = []
 
     @property
     def probability_per_second(self) -> float:
         return PROBABILITY_PERCENT / 100
 
     def run(self) -> None:
-        self.schedule_check()
-        self.root.mainloop()
-
-    def schedule_check(self) -> None:
-        if self.rng.random() < self.probability_per_second:
-            self.show_popup()
-        self.root.after(CHECK_INTERVAL_MS, self.schedule_check)
+        while True:
+            if self.rng.random() < self.probability_per_second:
+                self.show_popup()
+            time.sleep(CHECK_INTERVAL_SECONDS)
 
     def show_popup(self) -> None:
-        window = tk.Toplevel(self.root)
-        window.title(APP_NAME)
-        window.configure(bg="black")
-        window.attributes("-topmost", True)
-        window.attributes("-fullscreen", True)
+        pygame.init()
+        try:
+            display_info = pygame.display.Info()
+            screen_width = display_info.current_w
+            screen_height = display_info.current_h
 
-        image = self.load_champurrado_image(window.winfo_screenwidth(), window.winfo_screenheight())
-        photo = ImageTk.PhotoImage(image)
+            flags = pygame.FULLSCREEN | pygame.NOFRAME
+            screen = pygame.display.set_mode((screen_width, screen_height), flags)
+            pygame.display.set_caption(APP_NAME)
 
-        panel = tk.Label(window, image=photo, bg="black")
-        panel.image = photo
-        panel.pack(expand=True)
+            image = self.load_champurrado_image(screen_width, screen_height)
+            image_surface = self.pil_to_surface(image)
 
-        close_action = lambda event=None: self.close_popup(window)
-        window.bind("<Escape>", close_action)
-        window.bind("<Button-1>", close_action)
+            screen.fill((0, 0, 0))
+            image_rect = image_surface.get_rect(center=(screen_width // 2, screen_height // 2))
+            screen.blit(image_surface, image_rect)
+            pygame.display.flip()
 
-        self.active_popups.append(window)
-        window.after(POPUP_DURATION_MS, close_action)
+            start = time.monotonic()
+            duration_seconds = POPUP_DURATION_MS / 1000
+            while time.monotonic() - start < duration_seconds:
+                for event in pygame.event.get():
+                    if event.type in (pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                        return
+                time.sleep(0.01)
+        finally:
+            pygame.display.quit()
+            pygame.quit()
 
-    def close_popup(self, window: tk.Toplevel) -> None:
-        if window in self.active_popups:
-            self.active_popups.remove(window)
-        if window.winfo_exists():
-            window.destroy()
+    def pil_to_surface(self, image: Image.Image) -> pygame.Surface:
+        rgb_image = image.convert("RGB")
+        return pygame.image.fromstring(rgb_image.tobytes(), rgb_image.size, "RGB")
 
     def load_champurrado_image(self, screen_width: int, screen_height: int) -> Image.Image:
         candidates = self.candidate_image_paths()
